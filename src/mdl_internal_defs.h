@@ -1,3 +1,19 @@
+/*****************************************************************************/
+/*    'Confusion', a MDL intepreter                                         */
+/*    Copyright 2009 Matthew T. Russotto                                    */
+/*                                                                          */
+/*    This program is free software: you can redistribute it and/or modify  */
+/*    it under the terms of the GNU General Public License as published by  */
+/*    the Free Software Foundation, version 3 of 29 June 2007.              */
+/*                                                                          */
+/*    This program is distributed in the hope that it will be useful,       */
+/*    but WITHOUT ANY WARRANTY; without even the implied warranty of        */
+/*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         */
+/*    GNU General Public License for more details.                          */
+/*                                                                          */
+/*    You should have received a copy of the GNU General Public License     */
+/*    along with this program.  If not, see <http://www.gnu.org/licenses/>. */
+/*****************************************************************************/
 // This forward declaration is necessary
 struct atom_t;
 
@@ -368,7 +384,6 @@ mdl_value_t *mdl_eval_apply_expr(mdl_value_t *appl_expr);
 mdl_value_t *mdl_std_eval(mdl_value_t *l, bool in_struct = false, int as_type = MDL_TYPE_NOTATYPE);
 mdl_value_t *mdl_new_mdl_value();
 mdl_value_t *mdl_set_lval(atom_t *a, mdl_value_t *val, mdl_frame_t *frame);
-mdl_value_t *mdl_set_gval(const char *name, mdl_value_t *val);
 mdl_value_t *mdl_set_gval(atom_t *name, mdl_value_t *val);
 mdl_value_t *mdl_internal_eval_put(mdl_value_t *arg, mdl_value_t *indexval, mdl_value_t *newitem);
 mdl_value_t *mdl_internal_eval_nth(mdl_value_t *arg, mdl_value_t *indexval);

@@ -1,13 +1,26 @@
+/*****************************************************************************/
+/*    'Confusion', a MDL intepreter                                         */
+/*    Copyright 2009 Matthew T. Russotto                                    */
+/*                                                                          */
+/*    This program is free software: you can redistribute it and/or modify  */
+/*    it under the terms of the GNU General Public License as published by  */
+/*    the Free Software Foundation, version 3 of 29 June 2007.              */
+/*                                                                          */
+/*    This program is distributed in the hope that it will be useful,       */
+/*    but WITHOUT ANY WARRANTY; without even the implied warranty of        */
+/*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         */
+/*    GNU General Public License for more details.                          */
+/*                                                                          */
+/*    You should have received a copy of the GNU General Public License     */
+/*    along with this program.  If not, see <http://www.gnu.org/licenses/>. */
+/*****************************************************************************/
 #include "macros.hpp"
 #include "mdl_internal_defs.h"
 #include "mdl_builtins.h"
 #include <ctype.h>
 #include <string.h>
 #include <errno.h>
-extern "C" 
-{
-#include <gc/cord.h>
-}
+#include "mdl_strbuf.h"
 
 typedef enum outbuf_items_t
 {
@@ -497,45 +510,45 @@ const char *mdl_quote_atomname(const char *name, bool *nonnump)
     else return name;
 }
 
-CORD mdl_unparse_atom(const atom_t *a, bool princ, bool nonnum, bool *breakable, mdl_value_t *oblists)
+mdl_strbuf_t *mdl_unparse_atom(const atom_t *a, bool princ, bool nonnum, bool *breakable, mdl_value_t *oblists)
 {
     *breakable = false;
-    CORD r;
+    mdl_strbuf_t *r = mdl_new_strbuf(40);
 
-    if (!a) return "#ATOM 0"; // should never happen, but GROW and CHUTYPE can do it
+    if (!a) return mdl_strbuf_append_cstr(r,"#ATOM 0"); // should never happen, but GROW and CHUTYPE can do it
     if (princ)
     {
-        r = CORD_from_char_star(a->pname);
+        r = mdl_strbuf_append_cstr(r, a->pname);
         return r;
     }
     else
-        r = CORD_from_char_star(mdl_quote_atomname(a->pname, &nonnum));
+        r = mdl_strbuf_append_cstr(r, mdl_quote_atomname(a->pname, &nonnum));
     
     if (!a->oblist) 
     {
-        r = CORD_cat_char_star(r, "!-#FALSE ()", 11);
+        r = mdl_strbuf_append_cstr_len(r, "!-#FALSE ()", 11);
         *breakable = true;
     }
     else
     {
         if (!mdl_value_equal_atom(mdl_get_atom_default_oblist(a->pname, false, oblists), a))
         {
-            r = CORD_cat_char_star(r, "!-", 2);
+            r = mdl_strbuf_append_cstr_len(r, "!-", 2);
             if (a->oblist != mdl_value_root_oblist)
             {
                 atom_t *oname = mdl_get_oblist_name(a->oblist);
                 if (!oname)
                 {
-                    r = CORD_cat_char_star(r, "!-#FALSE ()", 11);
+                    r = mdl_strbuf_append_cstr_len(r, "!-#FALSE ()", 11);
                     *breakable = true;
                 }
                 else
-                    r = CORD_cat(r, mdl_unparse_atom(oname, princ, true, breakable, oblists));
+                    r = mdl_strbuf_append_strbuf(r, mdl_unparse_atom(oname, princ, true, breakable, oblists));
             }
         }
         else if (!nonnum)
         {
-            r = CORD_cat("\\", r);
+            r = mdl_strbuf_prepend_cstr("\\", r);
         }
     }
     return r;
@@ -544,9 +557,9 @@ CORD mdl_unparse_atom(const atom_t *a, bool princ, bool nonnum, bool *breakable,
 void mdl_print_atom_to_chan(mdl_value_t *chan, const atom_t *a, bool princ, bool prespace, mdl_value_t *oblists)
 {
     bool breakable = true;
-    CORD r = mdl_unparse_atom(a, princ, false, &breakable, oblists);
-    int len = CORD_len(r);
-    char *ps = CORD_to_char_star(r);
+    mdl_strbuf_t *r = mdl_unparse_atom(a, princ, false, &breakable, oblists);
+    int len = mdl_strbuf_len(r);
+    char *ps = mdl_strbuf_to_new_cstr(r);
     if (breakable)
     {
         mdl_print_string_to_chan(chan, ps, len-3, 0, true, prespace);
@@ -594,16 +607,16 @@ int mdl_int_to_string(MDL_INT mi, char *buf, int buflen, int radix)
 
 void mdl_print_hashtype(mdl_value_t *chan, int type, bool princ, bool prespace, mdl_value_t *oblists)
 {
-    CORD r;
+    mdl_strbuf_t *r;
     int rlen;
     char *rstr;
     atom_t *a = mdl_type_atom(type);
     bool breakable;
     
     // Note a->type, not print_as_type
-    r = CORD_cat("#", mdl_unparse_atom(a, princ, true, &breakable, oblists));
-    rstr = CORD_to_char_star(r);
-    rlen = CORD_len(r);
+    r = mdl_strbuf_prepend_cstr("#", mdl_unparse_atom(a, princ, true, &breakable, oblists));
+    rstr = mdl_strbuf_to_new_cstr(r);
+    rlen = mdl_strbuf_len(r);
     if (breakable)
     {
         mdl_print_string_to_chan(chan, rstr - 3, rlen - 3, 0, true, prespace);
@@ -916,6 +929,34 @@ void mdl_print_tuple_to_chan(mdl_value_t *chan, const mdl_value_t *v, int print_
     mdl_print_string_to_chan(chan, "?]", 2, 0, true, false);
 }
 
+void mdl_quote_string(counted_string_t *d, const counted_string_t *s)
+{
+    const char *sp;
+    char *dp;
+    int i;
+    bool needsquote = false;
+
+    *d = *s;
+    for (i = 0, sp = s->p; i < s->l; i++, sp++)
+    {
+        if (*sp == '"' || *sp == '\\') 
+        {
+            needsquote = true;
+            d->l++;
+        }
+    }
+
+    if (needsquote)
+    {
+        d->p = (char *)GC_MALLOC_ATOMIC(d->l + 1);
+        for (i = 0, sp = s->p, dp = d->p; i < s->l; i++, sp++, dp++)
+        {
+            if (*sp == '"' || *sp == '\\') *dp++ = '\\';
+            *dp = *sp;
+        }
+        *dp = 0;
+    }
+}
 void mdl_print_stringval_to_chan(mdl_value_t *chan, const mdl_value_t *v, int print_as_type, bool princ, bool prespace, mdl_value_t *oblists)
 {
     if (v->type != MDL_TYPE_STRING)
@@ -931,6 +972,10 @@ void mdl_print_stringval_to_chan(mdl_value_t *chan, const mdl_value_t *v, int pr
     }
     else
     {
+        counted_string_t ns;
+        mdl_quote_string(&ns, &v->v.s);
+        s = ns.p;
+        len = ns.l;
         mdl_print_string_to_chan(chan, "\"", 1, len+1, true, prespace);
         mdl_print_string_to_chan(chan, s, len, 0, false, false);
         mdl_print_string_to_chan(chan, "\"", 1, 0, false, false);

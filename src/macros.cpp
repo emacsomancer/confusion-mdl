@@ -1,6 +1,19 @@
-extern "C" {
-#include <gc/cord.h>
-}
+/*****************************************************************************/
+/*    'Confusion', a MDL intepreter                                         */
+/*    Copyright 2009 Matthew T. Russotto                                    */
+/*                                                                          */
+/*    This program is free software: you can redistribute it and/or modify  */
+/*    it under the terms of the GNU General Public License as published by  */
+/*    the Free Software Foundation, version 3 of 29 June 2007.              */
+/*                                                                          */
+/*    This program is distributed in the hope that it will be useful,       */
+/*    but WITHOUT ANY WARRANTY; without even the implied warranty of        */
+/*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         */
+/*    GNU General Public License for more details.                          */
+/*                                                                          */
+/*    You should have received a copy of the GNU General Public License     */
+/*    along with this program.  If not, see <http://www.gnu.org/licenses/>. */
+/*****************************************************************************/
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -14,6 +27,7 @@ extern "C" {
 #include "mdl_builtin_types.h"
 #include "mdl_builtins.h"
 #include "mdl_assoc.hpp"
+#include "mdl_strbuf.h"
 
 #define DECODE_TENEX_FILESPECS
 
@@ -283,6 +297,51 @@ bool mdl_value_equal(const mdl_value_t *a, const mdl_value_t *b)
         return (a->v.s.l == b->v.s.l) && !memcmp(a->v.s.p, b->v.s.p, a->v.s.l);
     case PRIMTYPE_LIST:
         return mdl_value_equal(a->v.p.car, b->v.p.car) && mdl_value_equal(a->v.p.cdr, b->v.p.cdr);
+    case PRIMTYPE_VECTOR:
+    {
+        int len = VLENGTH(a);
+        if (len != VLENGTH(b)) return false;
+        mdl_value_t *elema = VREST(a, 0);
+        mdl_value_t *elemb = VREST(b, 0);
+        while (len--)
+        {
+            if (!mdl_value_equal(elema, elemb)) return false;
+            elema++;
+            elemb++;
+        }
+        return true;
+    }
+    case PRIMTYPE_TUPLE:
+    {
+        int len = TPLENGTH(a);
+        if (len != TPLENGTH(b)) return false;
+        mdl_value_t *elema = TPREST(a, 0);
+        mdl_value_t *elemb = TPREST(b, 0);
+        while (len--)
+        {
+            if (!mdl_value_equal(elema, elemb)) return false;
+            elema++;
+            elemb++;
+        }
+        return true;
+    }
+    case PRIMTYPE_UVECTOR:
+    {
+        int len = UVLENGTH(a);
+        if (len != UVLENGTH(b)) return false;
+        if (UVTYPE(a) != UVTYPE(b)) return false;
+        uvector_element_t *elema = UVREST(a, 0);
+        uvector_element_t *elemb = UVREST(b, 0);
+        while (len--)
+        {
+            mdl_value_t *vala = mdl_uvector_element_to_value(a, elema, NULL);
+            mdl_value_t *valb = mdl_uvector_element_to_value(b, elemb, NULL);
+            if (!mdl_value_equal(vala, valb)) return false;
+            elema++;
+            elemb++;
+        }
+        return true;
+    }
     case PRIMTYPE_FRAME:
         return a->v.f == b->v.f;
     }
@@ -535,7 +594,10 @@ bool mdl_oblists_are_reasonable(mdl_value_t *oblists)
     oblists = oblists->v.p.cdr;
     while (oblists)
     {
-        if (oblists->v.p.car->type != MDL_TYPE_OBLIST) return false;
+        if (oblists->v.p.car->type != MDL_TYPE_OBLIST &&
+            (oblists->v.p.car->type != MDL_TYPE_ATOM ||
+             !mdl_value_double_equal(oblists->v.p.car, mdl_value_atom_default))
+            ) return false;
         oblists = oblists->v.p.cdr;
     }
     return true;
@@ -1182,7 +1244,7 @@ void mdl_decode_file_args(mdl_value_t **name1p, mdl_value_t **name2p, mdl_value_
 
 char *mdl_build_pathname(mdl_value_t *name1v, mdl_value_t *name2v, mdl_value_t *devv, mdl_value_t *dirv)
 {
-    CORD pname = CORD_EMPTY;
+    mdl_strbuf_t *pname = mdl_new_strbuf(256);
     
     char *name1 = name1v->v.s.p;
     char *name2 = name2v->v.s.p;
@@ -1195,17 +1257,18 @@ char *mdl_build_pathname(mdl_value_t *name1v, mdl_value_t *name2v, mdl_value_t *
 
     if (dir)
     {
-        pname = dir;
-        if (dir[dirlen - 1] != '/') pname = CORD_cat(pname, "/");
+        pname = mdl_strbuf_append_cstr(pname, dir);
+        if (dir[dirlen - 1] != '/') pname = mdl_strbuf_append_cstr(pname, "/");
     }
-    if (name1len) pname = CORD_cat(pname, name1);
+    if (name1len) pname = mdl_strbuf_append_cstr(pname, name1);
     if (name2len)
     {
-        pname = CORD_cat(pname, ".");
-        pname = CORD_cat(pname, name2);
+        pname = mdl_strbuf_append_cstr(pname, ".");
+        pname = mdl_strbuf_append_cstr(pname, name2);
     }
-    return CORD_to_char_star(pname);
+    return mdl_strbuf_to_new_cstr(pname);
 }
+
 char *mdl_build_chan_pathname(mdl_value_t *chan)
 {
     return mdl_build_pathname(VITEM(chan, CHANNEL_SLOT_FNARG1), VITEM(chan, CHANNEL_SLOT_FNARG2), VITEM(chan, CHANNEL_SLOT_DEVNARG),VITEM(chan, CHANNEL_SLOT_DIRNARG));
@@ -1244,10 +1307,11 @@ mdl_value_t *mdl_internal_open_channel(mdl_value_t *chan)
         char *wd = mdl_getcwd();
         if (wd)
         {
-            CORD absdir = wd;
-            if (wd[strlen(wd)-1] != '/') absdir = CORD_cat(absdir, "/");
-            absdir = CORD_cat(absdir, VITEM(chan,CHANNEL_SLOT_DIRNARG)->v.s.p);
-            *VITEM(chan,CHANNEL_SLOT_DIRN) = *mdl_new_string(CORD_to_char_star(absdir));
+            mdl_strbuf_t *absdir = mdl_new_strbuf(256);
+            absdir = mdl_strbuf_append_cstr(absdir, wd);
+            if (wd[strlen(wd)-1] != '/') absdir = mdl_strbuf_append_cstr(absdir, "/");
+            absdir = mdl_strbuf_append_cstr(absdir, VITEM(chan,CHANNEL_SLOT_DIRNARG)->v.s.p);
+            *VITEM(chan,CHANNEL_SLOT_DIRN) = *mdl_new_string(mdl_strbuf_to_const_cstr(absdir));
         }
     }
     if (!isatty(fileno(f)))
@@ -1456,7 +1520,7 @@ void mdl_longjmp_to(mdl_frame_t *jump_frame, int value)
     {
         if (frame->frame_flags & MDL_FRAME_FLAGS_UNWIND)
         {
-            fprintf(stderr, "UNWINDING\n");
+//            fprintf(stderr, "UNWINDING\n");
             unwind_val = mdl_internal_eval_nth_i(frame->args,2);
             frame = mdl_pop_frame(frame->prev_frame);
             mdl_eval(unwind_val);
@@ -1725,7 +1789,7 @@ mdl_value_t *mdl_bind_args(mdl_value_t *fargs,
             if (farg->type != MDL_TYPE_FORM && farg->type != MDL_TYPE_ATOM)
                 mdl_error("First element in 2-list must be atom or quoted atom");
             if (argstate != ARGSTATE_OPTIONAL && argstate != ARGSTATE_AUX)
-                mdl_error("2-lists allowed only in OPTIONAL or AUX sections");
+                return mdl_call_error_ext("FIXME", "2-lists allowed only in OPTIONAL or AUX sections", NULL);
         }
 
         if (farg->type == MDL_TYPE_STRING)
@@ -1808,7 +1872,7 @@ mdl_value_t *mdl_bind_args(mdl_value_t *fargs,
                 {
                     mdl_value_t *arg = argptr->v.p.car;
                     if (!called_from_apply_subr)
-                        arg = mdl_eval(arg, false);
+                        arg = mdl_eval(arg, false, mdl_make_frame_value(prev_frame));
                     if (!mdl_bind_local_symbol(farg->v.a, arg, frame, false))
                         return mdl_call_error_ext ("BAD-ARGUMENT-LIST", "Duplicate formal argument", farg, fargs, NULL);
                     argptr = argptr->v.p.cdr;
@@ -1816,7 +1880,7 @@ mdl_value_t *mdl_bind_args(mdl_value_t *fargs,
                 }
                 else if (argstate != ARGSTATE_OPTIONAL)
                 {
-                    mdl_error("Too few args in function call");
+                    return mdl_call_error("TOO-FEW-ARGUMENTS-SUPPLIED", frame->subr, NULL);
                 }
                 else 
                 {
@@ -1853,20 +1917,19 @@ mdl_value_t *mdl_bind_args(mdl_value_t *fargs,
             }
             case ARGSTATE_TUPLE:
             {
+                // fixme -- need a better way of switching frames
+                // probably just need to switch at AUX or first time
+                // OPT argument isn't found
                 mdl_value_t *argsval;
                 if (!called_from_apply_subr)
                 {
+                    mdl_frame_t *save_frame = cur_frame;
+                    cur_frame = prev_frame;
+
                     argsval = mdl_std_eval(mdl_make_list(argptr), false, MDL_TYPE_LIST);
                     if (argsval)
                         argsval = mdl_make_tuple(LREST(argsval, 0), MDL_TYPE_TUPLE);
-#if 0
-                    mdl_value_t *tpitem = TPITEM(argsval, 0);
-                    for (int i = 0; i < TPLENGTH(argsval); i++)
-                    {
-                        *tpitem = *(mdl_eval(tpitem, false));
-                        tpitem++;
-                    }
-#endif
+                    cur_frame = save_frame;
                 }
                 else
                 {
@@ -2202,14 +2265,20 @@ mdl_value_t *mdl_std_apply(mdl_value_t *applier, mdl_value_t *apply_to, int appl
 //            mdl_error("Can't use APPLY with FIXes");
 
         if (LHASITEM(apply_to, 3))
-            mdl_error("Too many arguments to FIX");
+            mdl_call_error_ext("TOO-MANY-ARGUMENTS-SUPPLIED", "Too many arguments to FIX", NULL);
         if (!LHASITEM(apply_to, 1))
-            mdl_error("Too few arguments to FIX");
+            mdl_call_error_ext("TOO-FEW-ARGUMENTS-SUPPLIED","Too few arguments to FIX", NULL);
         mdl_value_t *index = applier;
-        mdl_value_t *struc = mdl_eval(LITEM(apply_to, 1));
+        mdl_value_t *struc = LITEM(apply_to, 1);
         mdl_value_t *newitem = LITEM(apply_to, 2);
+        
+        if (!called_from_apply_subr)
+        {
+            struc = mdl_eval(struc);
+            if (newitem) newitem = mdl_eval(newitem);
+        }
         if (newitem)
-            result = mdl_internal_eval_put(struc, index, mdl_eval(newitem));
+            result = mdl_internal_eval_put(struc, index, newitem);
         else
             result = mdl_internal_eval_nth_copy(struc, index);
         mdl_pop_frame(frame->prev_frame);
@@ -2629,7 +2698,7 @@ mdl_value_t *mdl_std_eval(mdl_value_t *l, bool in_struct, int as_type)
                 mdl_value_t *seg = mdl_eval(item, true);
                 if (mdl_primtype_nonstructured(seg->pt))
                 {
-                    mdl_error("Segment evaluated to nonstructured type");
+                    return mdl_call_error_ext("ILLEGAL-SEGMENT","Segment evaluated to nonstructured type", item, NULL);
                 }
                 if (!rest && seg->pt == PRIMTYPE_LIST)
                 {
@@ -2673,7 +2742,7 @@ mdl_value_t *mdl_std_eval(mdl_value_t *l, bool in_struct, int as_type)
     }
     case MDL_TYPE_SEGMENT:
         if (!in_struct)
-            mdl_error("Attempt to evaluate segment outside structured type");
+            return mdl_call_error_ext("ILLEGAL-SEGMENT", "Attempt to evaluate segment outside structured type", NULL);
         /* FALLTHROUGH */
     case MDL_TYPE_FORM:
         if (l->v.p.cdr)
@@ -3338,7 +3407,7 @@ mdl_value_t *mdl_internal_eval_put(mdl_value_t *arg, mdl_value_t *indexval, mdl_
     default:
         if (mdl_primtype_nonstructured(arg->pt))
         {
-            mdl_error("First argument to PUT must be structured");
+            mdl_call_error_ext("FIXME", "First argument to PUT must be structured", cur_frame->subr, NULL);
         }
         // VECTOR, UVECTOR, BYTES
         mdl_error("UNIMPLEMENTED PRIMTYPE");
@@ -3423,7 +3492,6 @@ mdl_value_t *mdl_internal_eval_mapfr(mdl_value_t *form, mdl_value_t *args, bool 
                     val = mdl_internal_eval_rest_i(s, 0);
                 else
                     val = mdl_internal_eval_nth_copy(s, NULL);
-                *s = *mdl_internal_eval_rest(s, NULL);
                 mdl_additem(lastitem, val, &lastitem);
             }
         }
@@ -3462,6 +3530,11 @@ mdl_value_t *mdl_internal_eval_mapfr(mdl_value_t *form, mdl_value_t *args, bool 
                 break;
             default:
                 mdl_error("Bad longjmp to MAPF/R");
+            }
+            for (i = 0; i < num_structs; i++)
+            {
+                mdl_value_t *s = TPITEM(stup, i);
+                *s = *mdl_internal_eval_rest(s, NULL);
             }
         }
     }
@@ -4482,7 +4555,7 @@ mdl_value_t *mdl_builtin_eval_string(mdl_value_t *form, mdl_value_t *args)
             length += cursor->v.p.car->v.s.l;
             break;
         default:
-            mdl_error("Arguments to STRING must be strings or characters");
+            mdl_call_error_ext("ARG-WRONG-TYPE", "Arguments to STRING must be strings or characters", NULL);
         }
         cursor = cursor->v.p.cdr;
     }
@@ -4654,8 +4727,8 @@ mdl_value_t *mdl_builtin_eval_putrest(mdl_value_t *form, mdl_value_t *args)
     GETNEXTARG(head, args);
     GETNEXTREQARG(tail, args);
     NOMOREARGS(args);
-    if (head->pt != PRIMTYPE_LIST) mdl_error("First arg to PUTREST must have primtype LIST");
-    if (tail->pt != PRIMTYPE_LIST) mdl_error("Second arg to PUTREST must have primtype LIST");
+    if (head->pt != PRIMTYPE_LIST) return mdl_call_error_ext("FIRST-ARG-WRONG-TYPE", "First arg to PUTREST must have primtype LIST", cur_frame->subr, head, NULL);
+    if (tail->pt != PRIMTYPE_LIST) return mdl_call_error_ext("SECOND-ARG-WRONG-TYPE", "Second arg to PUTREST must have primtype LIST", cur_frame->subr, head, NULL);
     
     if (!head->v.p.cdr)
         mdl_error("Can't PUTREST on an empty list");
@@ -5657,7 +5730,7 @@ mdl_value_t *mdl_builtin_eval_memq(mdl_value_t *form, mdl_value_t *args)
     mdl_struct_walker_t w;
     mdl_value_t *elem;
 
-    if (!obj) mdl_error("Not enough arguments to MEMQ");
+    if (!structured) mdl_error("Not enough arguments to MEMQ");
     if (LHASITEM(args, 2))
         mdl_error("Too many args to MEMQ");
     if (mdl_primtype_nonstructured(structured->pt)) mdl_error("Second arg to MEMQ must be structured");
@@ -6193,7 +6266,7 @@ mdl_value_t *mdl_builtin_eval_oblistp(mdl_value_t *form, mdl_value_t *args)
     if (LHASITEM(args, 1))
         mdl_error("Too many arguments to OBLIST?");
     if (a->type != MDL_TYPE_ATOM)
-        mdl_error("First argument to OBLIST? must be atom");
+        return mdl_call_error("FIRST-ARG-WRONG-TYPE", cur_frame->subr, a, NULL);
     if (!a->v.a->oblist) return &mdl_value_false;
     return a->v.a->oblist;
 }
@@ -6275,9 +6348,9 @@ mdl_value_t *mdl_builtin_eval_insert(mdl_value_t *form, mdl_value_t *args)
     if (str->type == MDL_TYPE_ATOM)
     {
         if (str->v.a->oblist)
-            mdl_error("Cannot INSERT, atom already on plist");
+            return mdl_call_error_ext("ATOM-ALREADY-THERE", "Cannot INSERT, atom already on plist", str, mdl_internal_eval_getprop(oblist, mdl_value_oblist), NULL);
         if (mdl_get_atom_from_oblist(str->v.a->pname, oblist))
-            mdl_error("Cannot INSERT, atom with same pname exists on oblist");
+            return mdl_call_error_ext("ATOM-ALREADY-THERE", "Cannot INSERT, atom with same pname exists on oblist", str, mdl_internal_eval_getprop(oblist, mdl_value_oblist), NULL);
         mdl_put_atom_in_oblist(str->v.a->pname, oblist, str);
         str->v.a->oblist = oblist;
         result = str;
@@ -6317,7 +6390,7 @@ mdl_value_t *mdl_builtin_eval_spname(mdl_value_t *form, mdl_value_t *args)
     if (!a)
         mdl_error("Not enough arguments to SPNAME");
     if (a->type != MDL_TYPE_ATOM)
-        mdl_error("First argument to SPNAME must be ATOM");
+        mdl_call_error("FIRST-ARG-WRONG-TYPE", cur_frame->subr, a, NULL);
     if (LHASITEM(args, 1))
         mdl_error("Too many arguments to SPNAME");
     return mdl_make_string(a->v.a->pname);
@@ -6354,10 +6427,12 @@ mdl_value_t *mdl_builtin_eval_endblock(mdl_value_t *form, mdl_value_t *args)
 mdl_value_t *mdl_builtin_eval_not(mdl_value_t *form, mdl_value_t *args)
 /* SUBR */
 {
-    mdl_value_t *arg = LITEM(args, 0);
+    ARGSETUP(args);
+    mdl_value_t *arg;
 
-    if (!arg)
-        mdl_error("Not enough args to NOT");
+    GETNEXTREQARG(arg, args);
+    NOMOREARGS(args);
+
     return mdl_boolean_value(!mdl_is_true(arg));
 }
 
@@ -8005,5 +8080,34 @@ mdl_value_t *mdl_builtin_eval_sleep(mdl_value_t *form, mdl_value_t *args)
     fflush(stdout); // let the user see while we rest
     sleep(fix->v.w);
 
+    return mdl_value_T;
+}
+
+// GPL implementing functions
+mdl_value_t *mdl_builtin_eval_warranty(mdl_value_t *form, mdl_value_t *args)
+/* SUBR */
+{
+    extern const char no_warranty[];
+    mdl_value_t *chan = NULL;
+    ARGSETUP(args);
+    NOMOREARGS(args);
+
+    mdl_setup_frame_for_print(&chan);
+    mdl_print_string_to_chan(chan, no_warranty, strlen(no_warranty), 0, false, false);
+    mdl_print_newline_to_chan(chan, false, NULL);
+    return &mdl_value_false;
+}
+
+mdl_value_t *mdl_builtin_eval_copying(mdl_value_t *form, mdl_value_t *args)
+/* SUBR */
+{
+    extern const char copying[];
+    mdl_value_t *chan = NULL;
+    ARGSETUP(args);
+    NOMOREARGS(args);
+
+    mdl_setup_frame_for_print(&chan);
+    mdl_print_string_to_chan(chan, copying, strlen(copying), 0, false, false);
+    mdl_print_newline_to_chan(chan, false, NULL);
     return mdl_value_T;
 }

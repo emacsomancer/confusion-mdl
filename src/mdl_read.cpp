@@ -1,3 +1,19 @@
+/*****************************************************************************/
+/*    'Confusion', a MDL intepreter                                         */
+/*    Copyright 2009 Matthew T. Russotto                                    */
+/*                                                                          */
+/*    This program is free software: you can redistribute it and/or modify  */
+/*    it under the terms of the GNU General Public License as published by  */
+/*    the Free Software Foundation, version 3 of 29 June 2007.              */
+/*                                                                          */
+/*    This program is distributed in the hope that it will be useful,       */
+/*    but WITHOUT ANY WARRANTY; without even the implied warranty of        */
+/*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         */
+/*    GNU General Public License for more details.                          */
+/*                                                                          */
+/*    You should have received a copy of the GNU General Public License     */
+/*    along with this program.  If not, see <http://www.gnu.org/licenses/>. */
+/*****************************************************************************/
 #include "macros.hpp"
 #include "mdl_internal_defs.h"
 #include <stdlib.h>
@@ -1122,7 +1138,7 @@ mdl_value_t *mdl_advance_readstate(mdl_value_t *chan, readstate_t **rdstatep, MD
                     case READSTATE_TYPECODE:
                         rdstate->prev->typecode = mdl_get_typenum(rdstate->objects);
                         if (rdstate->prev->typecode == MDL_TYPE_NOTATYPE)
-                            mdl_error("#ATOM does not name a type");
+                            mdl_call_error("#ATOM does not name a type", rdstate->objects, NULL);
                         break;
                     case READSTATE_COMMENT:
                         // print comments to aid debugging

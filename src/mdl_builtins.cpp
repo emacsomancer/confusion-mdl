@@ -182,6 +182,8 @@ void mdl_create_builtins()
     MDL_BUILTIN(DISABLE, disable, SUBR, mdl_builtin_eval_disable);
     MDL_BUILTIN(INT-LEVEL, int_level, SUBR, mdl_builtin_eval_int_level);
     MDL_BUILTIN(SLEEP, sleep, SUBR, mdl_builtin_eval_sleep);
+    MDL_BUILTIN(WARRANTY, warranty, SUBR, mdl_builtin_eval_warranty);
+    MDL_BUILTIN(COPYING, copying, SUBR, mdl_builtin_eval_copying);
 }
 mdl_value_t *mdl_value_builtin_quote;
 mdl_value_t *mdl_value_builtin_lval;
@@ -361,3 +363,5 @@ mdl_value_t *mdl_value_builtin_enable;
 mdl_value_t *mdl_value_builtin_disable;
 mdl_value_t *mdl_value_builtin_int_level;
 mdl_value_t *mdl_value_builtin_sleep;
+mdl_value_t *mdl_value_builtin_warranty;
+mdl_value_t *mdl_value_builtin_copying;

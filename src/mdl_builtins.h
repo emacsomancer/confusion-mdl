@@ -176,3 +176,5 @@ extern mdl_value_t *mdl_value_builtin_enable;
 extern mdl_value_t *mdl_value_builtin_disable;
 extern mdl_value_t *mdl_value_builtin_int_level;
 extern mdl_value_t *mdl_value_builtin_sleep;
+extern mdl_value_t *mdl_value_builtin_warranty;
+extern mdl_value_t *mdl_value_builtin_copying;
