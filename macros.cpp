@@ -26,7 +26,6 @@
 #include <math.h>
 #include <unistd.h>
 #include <getopt.h>
-#include <cstdio.h>
 #include "macros.hpp"
 #include "mdl_internal_defs.h"
 #include "mdl_builtin_types.h"
