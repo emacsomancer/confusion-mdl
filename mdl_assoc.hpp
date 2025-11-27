@@ -19,7 +19,7 @@
 /*    along with this program.  If not, see <http://www.gnu.org/licenses/>. */
 /*****************************************************************************/
 
-#include <gc/gc.h>
+#include "gc_stub.h"
 
 typedef struct mdl_assoc_t
 {

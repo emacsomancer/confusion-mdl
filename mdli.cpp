@@ -18,7 +18,7 @@
 /*****************************************************************************/
 #include <stdio.h>
 #include <stdlib.h>
-#include <gc/gc.h>
+#include "gc_stub.h"
 #include <getopt.h>
 #include "macros.hpp"
 #include "mdl_internal_defs.h"
