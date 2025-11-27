@@ -35,7 +35,11 @@ GC_LIBS := $(shell \
 
 # Check if GC library is available on Linux
 ifeq ($(UNAME_S),Linux)
-  ifeq ($(GC_CFLAGS),)
+  GC_CHECK := $(shell pkg-config --exists bdw-gc 2>/dev/null && echo "found" || \
+    pkg-config --exists gc 2>/dev/null && echo "found" || \
+    test -f /usr/include/gc/gc.h && echo "found" || \
+    echo "")
+  ifeq ($(GC_CHECK),)
     $(error Boehm GC library not found. Please install it with: sudo apt-get install libgc-dev)
   endif
 endif
